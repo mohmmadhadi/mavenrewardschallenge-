@@ -10,17 +10,23 @@ library(cluster)
 library(factoextra)
 library(gridExtra)
 library(ggcorrplot)
+library(scales)
 
 
 #Loading Data
 unsupervised <- read.csv("F:/University/Projects/Data Science/Statistical Learning/Maven Project/unsupervised.csv")
 
 ###Data preparation
-
+unsupervised$row_id <- seq_len(nrow(unsupervised))
 str(unsupervised)
 
 # Convert 'became_member_on' to Date type
 unsupervised$became_member_on <- as.Date(unsupervised$became_member_on)
+
+
+# Creating a feature for Membership Duration (in days)
+unsupervised$membership_duration <- as.numeric(as.Date("2024-09-15") - unsupervised$became_member_on)
+
 
 # Encode 'gender' as numeric
 unsupervised$gender <- as.numeric(factor(unsupervised$gender, levels = c("M", "F", "O")))
@@ -32,14 +38,7 @@ data_numeric <- unsupervised %>%
 # Convert to data frame
 data_numeric <- as.data.frame(data_numeric)
 
-# Creating a feature for Membership Duration (in days)
-unsupervised$membership_duration <- as.numeric(Sys.Date() - unsupervised$became_member_on)
 
-# Adding the new feature to the numeric data
-data_numeric$membership_duration <- unsupervised$membership_duration
-
-#Normalizing data
-data_numeric <- scale(data_numeric)
 
 ###Exploratory Data Analysis
 # Visualize the data to check for outliers
@@ -65,12 +64,14 @@ for (i in seq_len(ncol(data_numeric))) {
 }
 
 # Remove rows with outliers
-data_cleaned <- data_numeric[!rows_with_outliers, ]
+keep_idx <- which(!rows_with_outliers)
+data_cleaned <- data_numeric[keep_idx, , drop = FALSE]
+kept_row_ids <- unsupervised$row_id[keep_idx]
 
 data <- as.data.frame(data_cleaned)
 
 # Print the result
-cat("Original number of rows:", nrow(data.scaled), "\n")
+cat("Original number of rows:", nrow(data_numeric), "\n")
 cat("Number of rows after removing outliers:", nrow(data_cleaned), "\n")
 print(data_cleaned)
 
@@ -92,7 +93,7 @@ apply(data_cleaned,2, sd)
 
 ###PCA
 # Execute PCA, with scaling: customer.pr
-customer.pr <- prcomp(data_cleaned)
+customer.pr <- prcomp(data_cleaned, scale. = FALSE)
 
 summary(customer.pr)
 
@@ -186,7 +187,7 @@ wss_pca <- sapply(1:10, function(k) {
 plot(1:10, wss_pca, type = "b", xlab = "Number of clusters (k)", ylab = "Within-cluster sum of squares")
 
 # Set number of clusters
-k <- 5
+k <- 6
 
 # Apply K-Means clustering on PCA data
 set.seed(123)
@@ -194,6 +195,22 @@ kmeans_result_pca <- kmeans(pca_data, centers = k, nstart = 25)
 
 # Add cluster assignment to PCA data
 data_pca$cluster <- as.factor(kmeans_result_pca$cluster)
+
+cluster_map <- data.frame(
+  row_id  = kept_row_ids,
+  cluster = factor(kmeans_result_pca$cluster)
+)
+
+df <- unsupervised %>%
+  inner_join(cluster_map, by = "row_id")
+
+
+x_visits <- "num_transactions"                 # تعداد تراکنش‌ها (visits)
+y_basket <- "avg_spending_per_transaction"     # میانگین مبلغ هر تراکنش (basket)
+rev_col  <- "total_spent"                      # مجموع هزینه/درآمد دوره (revenue)
+age_col  <- "age"                              # سن
+inc_col  <- "income"                           # درآمد
+
 
 ### Plot the clusters using the PCA results
 ggplot(data_pca, aes(x = PC2, y = PC1, color = cluster)) +
@@ -232,3 +249,68 @@ data_pca$hclust_cluster <- as.factor(pca_hclust_clusters)
 ggplot(data_pca, aes(x = PC1, y = PC2, color = hclust_cluster)) +
   geom_point() +
   labs(title = "Hierarchical Clustering Visualization with PCA")
+
+
+
+
+cluster_profile <- df %>%
+  dplyr::group_by(cluster) %>%
+  dplyr::summarise(
+    n_customers         = dplyr::n(),
+    share_of_customers  = n_customers / nrow(df),
+
+    revenue_total       = sum(.data[["total_spent"]], na.rm = TRUE),
+    share_of_revenue    = revenue_total / sum(df[["total_spent"]], na.rm = TRUE),
+
+    # Visits (num_transactions)
+    visits_med          = median(.data[["num_transactions"]], na.rm = TRUE),
+    visits_mean         = mean(.data[["num_transactions"]], na.rm = TRUE),
+    visits_iqr          = IQR(.data[["num_transactions"]], na.rm = TRUE),
+    visits_sd           = sd(.data[["num_transactions"]],  na.rm = TRUE),
+
+    # Basket (avg_spending_per_transaction)
+    basket_med          = median(.data[["avg_spending_per_transaction"]], na.rm = TRUE),
+    basket_mean         = mean(.data[["avg_spending_per_transaction"]], na.rm = TRUE),
+    basket_iqr          = IQR(.data[["avg_spending_per_transaction"]], na.rm = TRUE),
+    basket_sd           = sd(.data[["avg_spending_per_transaction"]],  na.rm = TRUE),
+
+    # Two “typical spend” definitions
+    monthly_spend_typ_med  = visits_med  * basket_med,   # رفتار تیپیک (robust)
+    monthly_spend_typ_mean = visits_mean * basket_mean,  # مقدار مورد انتظار
+
+    age_mean            = mean(.data[["age"]],    na.rm = TRUE),
+    income_mean         = mean(.data[["income"]], na.rm = TRUE)
+  ) %>%
+  dplyr::arrange(dplyr::desc(share_of_revenue))
+
+print(cluster_profile)
+
+
+cluster_bullets <- cluster_profile %>%
+  mutate(
+    title = paste0(
+      "Cluster ", cluster,
+      " — Customers ", percent(share_of_customers, accuracy = 1),
+      " | Revenue ", percent(share_of_revenue, accuracy = 1)
+    ),
+    bullets = paste0(
+      "• Size: ", n_customers, " (", percent(share_of_customers, accuracy = 1), " of customers)\n",
+      "• Revenue: ", round(revenue_total, 2), " (", percent(share_of_revenue, accuracy = 1), " of total)\n",
+      "• Visits — median ", round(visits_med), " (IQR ", round(visits_iqr, 2), "); ",
+      "mean ", round(visits_mean, 2), " (sd ", round(visits_sd, 2), ")\n",
+      "• Basket — median ", round(basket_med, 2), " (IQR ", round(basket_iqr, 2), "); ",
+      "mean ", round(basket_mean, 2), " (sd ", round(basket_sd, 2), ")\n",
+      "• Typical spend — median×median ", round(monthly_spend_typ_med, 2),
+      "; mean×mean ", round(monthly_spend_typ_mean, 2), "\n",
+      ifelse(is.na(age_mean),    "", paste0("• Mean age: ", round(age_mean), "\n")),
+      ifelse(is.na(income_mean), "", paste0("• Mean income: ", comma(round(income_mean)), "\n"))
+    )
+  ) %>%
+  arrange(desc(share_of_revenue)) %>%
+  select(cluster, title, bullets)
+
+# 8.2 چاپ خوانا در کنسول
+invisible(lapply(seq_len(nrow(cluster_bullets)), function(i) {
+  cat("\n", cluster_bullets$title[i], "\n", cluster_bullets$bullets[i], sep = "")
+}))
+
