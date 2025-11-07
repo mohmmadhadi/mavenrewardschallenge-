@@ -1,28 +1,4 @@
-# Install the necessary packages
-install.packages("caTools")
-install.packages("xgboost")
-install.packages("caret")
-install.packages("Matrix")
-install.packages("dplyr")
-install.packages("vcd")
-install.packages("ggplot2")
-install.packages("gridExtra")
-
-
-
-# Load necessary libraries
-library(corrplot)
-library(dplyr)
-library(ggplot2)
-library(vcd)  # For Cramér's V
-library(caTools)
-library(xgboost)
-library(caret)
-library(Matrix)
-library(dplyr)
-library(e1071)
-library(ggplot2)
-library(gridExtra)
+library(data.table)
 
 #Loading Data
 supervised <- read.csv("F:/University/Projects/Data Science/Statistical Learning/Maven Project/supervised.csv")
@@ -44,40 +20,55 @@ one_hot_gender <- model.matrix(~ gender - 1, data = supervised)
 # Append one-hot encoded columns back to the original dataset
 supervised <- cbind(supervised, one_hot_gender)
 
+# Drop the original 'gender' column
+supervised$gender <- NULL
+
 
 # Creating a feature for Membership Duration (in days)
-supervised$membership_duration <- as.numeric(Sys.Date() - supervised$became_member_on)
+supervised$membership_duration <- as.numeric(as.Date("2024-09-15") - supervised$became_member_on)
 
 # Bining membership_duration into 3 categories: "short-term," "medium-term," and "long-term"
 # We'll use quantiles to divide the data into roughly equal groups
 supervised$membership_category <- cut(supervised$membership_duration,
-                              breaks = quantile(supervised$membership_duration, probs = seq(0, 1, by = 1/3), na.rm = TRUE),
-                              labels = c("short-term", "medium-term", "long-term"),
-                              include.lowest = TRUE)
+                                      breaks = quantile(supervised$membership_duration, probs = seq(0, 1, by = 1/3), na.rm = TRUE),
+                                      labels = c("short-term", "medium-term", "long-term"),
+                                      include.lowest = TRUE)
 
 # Z-score Standardization (mean = 0, sd = 1)
 supervised$membership_duration_zscore <- (supervised$membership_duration - mean(supervised$membership_duration, na.rm = TRUE)) /
   sd(supervised$membership_duration, na.rm = TRUE)
 
+# Drop the original 'became_member_on' column
+supervised$became_member_on <- NULL
+
 # Binning age into categories: "young adult," "middle-aged," "senior"
 supervised$age_group <- cut(supervised$age,
-                    breaks = c(-Inf, 25, 45, 65, Inf),
-                    labels = c("young adult", "middle-aged", "senior", "elder"),
-                    right = FALSE)
+                            breaks = c(-Inf, 25, 45, 65, Inf),
+                            labels = c("young adult", "middle-aged", "senior", "elder"),
+                            right = FALSE)
 
 # Binning income into categories: "low," "medium," and "high"
 supervised$income_group <- cut(supervised$income,
-                       breaks = quantile(supervised$income, probs = seq(0, 1, by = 1/3), na.rm = TRUE),
-                       labels = c("low", "medium", "high"),
-                       include.lowest = TRUE)
+                               breaks = quantile(supervised$income, probs = seq(0, 1, by = 1/3), na.rm = TRUE),
+                               labels = c("low", "medium", "high"),
+                               include.lowest = TRUE)
+
+# Drop the original 'age' column
+supervised$age <- NULL
+
+# Drop the original 'income' column
+supervised$income <- NULL
 
 # Ordinal encoding for 'age_group'
 supervised$age_group <- factor(supervised$age_group, ordered = TRUE,
-                       levels = c("young adult", "middle-aged", "senior", "elder"))
+                               levels = c("young adult", "middle-aged", "senior", "elder"))
 
 # Ordinal encoding for 'income_group'
 supervised$income_group <- factor(supervised$income_group, ordered = TRUE,
-                          levels = c("low", "medium", "high"))
+                                  levels = c("low", "medium", "high"))
+
+str(supervised)
+
 
 # Create a target variable based on which offer type the customer completed the most
 supervised$preferred_offer_type <- apply(supervised[, c("offer_type_bogo_completed",
@@ -89,50 +80,6 @@ supervised$preferred_offer_type <- apply(supervised[, c("offer_type_bogo_complet
                                            max_index <- which.max(x)
                                            offer_types[max_index]
                                          })
-################################
-
-
-# Extract numeric features
-numeric_features <- supervised[, sapply(supervised, is.numeric)]
-
-# Calculate Pearson correlation for numeric features
-cor_matrix_numeric <- cor(numeric_features, use = "complete.obs")
-corrplot(cor_matrix_numeric, method = "color", type = "lower", tl.cex = 0.7)
-
-# Calculate Cramér's V for categorical features
-cramers_v_matrix <- function(df) {
-  n <- ncol(df)
-  result <- matrix(0, n, n)
-  colnames(result) <- colnames(df)
-  rownames(result) <- colnames(df)
-  for (i in 1:n) {
-    for (j in 1:n) {
-      if (i != j) {
-        result[i, j] <- assocstats(table(df[, i], df[, j]))$cramer
-      }
-    }
-  }
-  return(result)
-}
-
-# Apply to the factor columns
-categorical_features <- supervised[, sapply(supervised, is.factor)]
-cramer_matrix <- cramers_v_matrix(categorical_features)
-
-# Visualize Cramér's V for categorical features
-corrplot(cramer_matrix, method = "color", type = "lower", tl.cex = 0.7)
-
-
-####################################33
-# Drop useless columns
-supervised <- supervised %>% select(-gender, -became_member_on, -age, -income,
-                                    -offer_type_bogo_received, -offer_type_discount_received,
-                                    -offer_type_informational, -offer_type_bogo_completed,
-                                    -offer_type_discount_completed, -num_completions_after_info,
-                                    -last_transaction_time, -num_offers_viewed, -num_offers_completed,
-                                    -membership_duration)
-
-str(supervised)
 
 supervised[is.na(supervised)] <- 0
 
@@ -144,347 +91,297 @@ table(supervised$preferred_offer_type)
 supervised$preferred_offer_type <- as.factor(supervised$preferred_offer_type)
 
 
+cols_to_drop <- c("num_offers_received",
+                  "num_offers_viewed",
+                  "num_offers_completed",
+                  "offer_type_bogo_completed",
+                  "offer_type_discount_completed",
+                  "num_completions_after_info")
+
+supervised_noleak <- supervised[, setdiff(names(supervised), cols_to_drop)]
+
+
+
 
 ###MODEL
+# Install the necessary packages
+install.packages("xgboost")
+install.packages("caret")
+install.packages("Matrix")
+install.packages("dplyr")
 
-#######################################################################
-#XGBoost
+# Load the libraries
+library(xgboost)
+library(caret)
+library(Matrix)
+library(dplyr)
+library(mlr3)
 
-# Remove the customer_id as it is not a feature for prediction
-supervised <- supervised %>% select(-customer_id)
+# ===== Packages =====
+pkgs_needed <- c("mlr3verse","mlr3learners","mlr3tuning","mlr3pipelines","paradox","nnet")
+newp <- pkgs_needed[!(pkgs_needed %in% installed.packages()[, "Package"])]
+if (length(newp)) install.packages(newp, dependencies = TRUE)
+invisible(lapply(pkgs_needed, library, character.only = TRUE))
 
-# Set seed for reproducibility
-set.seed(123)
+set.seed(42)
 
-# Create a train/test split (70% train, 30% test)
-train_index <- createDataPartition(supervised$preferred_offer_type, p = 0.7, list = FALSE)
+# ===== 0) Task setup =====
+# Ensure target is factor
+supervised_noleak$preferred_offer_type <- as.factor(supervised$preferred_offer_type)
+# Drop IDs if present
+if ("customer_id" %in% names(supervised_noleak)) supervised_noleak$customer_id <- NULL
 
-# Split the data into training and test sets
-train_set <- supervised[train_index, ]
-test_set  <- supervised[-train_index, ]
+task_all <- TaskClassif$new(id = "offers_all", backend = supervised_noleak, target = "preferred_offer_type")
 
-# Check the dimensions to ensure the split worked correctly
-dim(train_set)
-dim(test_set)
+# ===== 1) 80/20 external split =====
+# stratified split to keep class ratios
+str(supervised)
 
-# Convert the data frame into a matrix, which is required by XGBoost
-x_train <- model.matrix(preferred_offer_type ~ . -1, data = train_set)
-x_test  <- model.matrix(preferred_offer_type ~ . -1, data = test_set)
+dt <- as.data.table(supervised_noleak)
+dt[, row_id := .I]
 
-# The target variable needs to be converted to numeric (XGBoost needs labels as integers)
-y_train <- as.numeric(train_set$preferred_offer_type) - 1 # XGBoost requires 0-based indexing
-y_test  <- as.numeric(test_set$preferred_offer_type) - 1
+dt <- dt[!is.na(preferred_offer_type)]
+dt[, preferred_offer_type := droplevels(preferred_offer_type)]
 
-# Convert the dataset into DMatrix objects (used by XGBoost)
-dtrain <- xgb.DMatrix(data = x_train, label = y_train)
-dtest  <- xgb.DMatrix(data = x_test, label = y_test)
+# 80% از هر کلاس با استفاده از ایندکس‌های ردیفی (.I)
+train_ids <- dt[, sample(.I, max(1, ceiling(.N * 0.8))), by = preferred_offer_type]$V1
+train_ids <- sort(unique(train_ids))
+test_ids  <- setdiff(seq_len(nrow(dt)), train_ids)
 
-# Set the parameters for the XGBoost model
-params <- list(
-  objective = "multi:softmax",  # Multi-class classification
-  eval_metric = "mlogloss",     # Evaluation metric (log loss)
-  num_class = 3,                # Number of classes
-  eta = 0.3,                    # Learning rate
-  max_depth = 6,                # Maximum depth of trees
-  subsample = 0.8,              # Row sampling rate
-  colsample_bytree = 0.8        # Feature sampling rate
+
+task_train <- TaskClassif$new("offers_train", backend = dt[train_ids], target = "preferred_offer_type")
+task_test  <- TaskClassif$new("offers_test",  backend = dt[test_ids],  target = "preferred_offer_type")
+
+
+# ===== 2) Build preprocessing pipeline (no leakage) =====
+po_imp_num <- po("imputemean")
+po_imp_cat <- po("imputemode")
+po_fix     <- po("fixfactors")
+po_encode  <- po("encode")
+po_const   <- po("removeconstants")
+po_scale   <- po("scale")
+
+# ===== 3) Candidate learners + search spaces (inner loop) =====
+# XGBoost
+lrn_xgb <- lrn("classif.xgboost", eval_metric = "mlogloss", booster = "gbtree");lrn_xgb$id <- "xgb"
+g_xgb <- as_learner(po_imp_num %>>% po_imp_cat %>>% po_fix %>>% po_encode %>>% po_const %>>% po_scale %>>% lrn_xgb)
+
+space_xgb <- ps(
+  xgb.nrounds          = p_int(100, 500),
+  xgb.eta              = p_dbl(0.01, 0.2),
+  xgb.max_depth        = p_int(2, 8),
+  xgb.subsample        = p_dbl(0.6, 1.0),
+  xgb.colsample_bytree = p_dbl(0.6, 1.0),
+  xgb.min_child_weight = p_dbl(1, 10),
+  xgb.gamma            = p_dbl(0, 5)
 )
 
-# Train the XGBoost model
-xgb_model <- xgb.train(
-  params = params,
-  data = dtrain,
-  nrounds = 100,                # Number of boosting rounds
-  watchlist = list(train = dtrain, eval = dtest),
-  early_stopping_rounds = 10,   # Stop early if no improvement after 10 rounds
-  verbose = 1                   # Print output
+# Random Forest (ranger)
+lrn_rf <- lrn("classif.ranger");lrn_rf$id  <- "rf"
+g_rf  <- as_learner(po_imp_num %>>% po_imp_cat %>>% po_fix %>>% po_encode %>>% po_const %>>% po_scale %>>% lrn_rf)
+
+space_rf <- ps(
+  rf.num.trees       = p_int(200, 800),
+  rf.mtry            = p_int(1, max(1, ncol(supervised)-1)),
+  rf.min.node.size   = p_int(1, 20),
+  rf.sample.fraction = p_dbl(0.5, 1.0)
 )
 
-# Make predictions on the test set
-y_pred <- predict(xgb_model, newdata = dtest)
+# Logistic regression multinom
+lrn_mn <- lrn("classif.multinom");lrn_mn$id  <- "mn"
+g_mn  <- as_learner(po_imp_num %>>% po_imp_cat %>>% po_fix %>>% po_encode %>>% po_const %>>% po_scale %>>% lrn_mn)
 
-# Convert predictions to factor for comparison
-y_pred <- as.factor(y_pred)
-y_test <- as.factor(y_test)
-
-# Calculate metrics for all classes
-metrics_1 <- confusionMatrix(y_pred, y_test, mode = "everything")
-print(metrics_1)
-
-# Extract precision, recall, F1-score, and other metrics
-precision <- metrics_1$byClass[, "Precision"]
-recall <- metrics_1$byClass[, "Recall"]
-f1_score <- metrics_1$byClass[, "F1"]
-
-# Print the metrics
-cat("Precision by Class: ", precision, "\n")
-cat("Recall by Class: ", recall, "\n")
-cat("F1-score by Class: ", f1_score, "\n")
-
-# Print the overall metrics like accuracy, Kappa, etc.
-cat("Overall Accuracy: ", metrics$overall['Accuracy'], "\n")
-cat("Overall Kappa: ", metrics$overall['Kappa'], "\n")
-
-# Get feature importance and plot
-importance_matrix <- xgb.importance(model = xgb_model)
-xgb.plot.importance(importance_matrix)
-
-
-###Biased results!
-
-# Get the class frequencies from the training set
-class_freq <- table(y_train)
-
-# Calculate the inverse of frequencies as class weights
-class_weights <- max(class_freq) / class_freq
-
-# Print the class weights for reference
-print(class_weights)
-
-
-# Adjust the parameters to include class weights
-params <- list(
-  objective = "multi:softmax",  # Multi-class classification
-  eval_metric = "mlogloss",     # Evaluation metric (log loss)
-  num_class = 3,                # Number of classes
-  eta = 0.3,                    # Learning rate
-  max_depth = 6,                # Maximum depth of trees
-  subsample = 0.8,              # Row sampling rate
-  colsample_bytree = 0.8        # Feature sampling rate
+space_mn <- ps(
+  mn.decay = p_dbl(0, 0.1),
+  mn.maxit = p_int(100, 500)
 )
 
-# Train the model with class weights applied
-xgb_model_weighted <- xgb.train(
-  params = params,
-  data = dtrain,
-  nrounds = 100,
-  watchlist = list(train = dtrain, eval = dtest),
-  early_stopping_rounds = 10,
-  weight = class_weights[as.factor(y_train) + 1],  # Apply class weights
-  verbose = 1
+# SVM (radial)
+lrn_svm <- lrn(
+  "classif.svm",
+  type   = "C-classification",   # لازم برای cost/gamma
+  kernel = "radial"
+)
+lrn_svm$id <- "svm"
+
+# گراف + تبدیل به learner
+g_svm <- as_learner(
+  po_imp_num %>>% po_imp_cat %>>% po_fix %>>% po_encode %>>% po_const %>>% po_scale %>>% lrn_svm
+)
+g_svm$predict_type <- "prob"
+space_svm <- ps(
+  svm.cost  = p_dbl(0.1, 10),
+  svm.gamma = p_dbl(1e-3, 1)
 )
 
-
-# Make predictions on the test set
-y_pred_weighted  <- predict(xgb_model_weighted, newdata = dtest)
-
-# Convert predictions to factor for comparison
-y_pred_weighted <- as.factor(y_pred_weighted)
-y_test <- as.factor(y_test)
-
-# Calculate metrics for all classes
-metrics_weighted_model <- confusionMatrix(y_pred_weighted, y_test, mode = "everything")
-print(metrics_weighted_model)
-
-# Extract precision, recall, F1-score, and other metrics
-precision <- metrics_weighted_model$byClass[, "Precision"]
-recall <- metrics_weighted_model$byClass[, "Recall"]
-f1_score <- metrics_weighted_model$byClass[, "F1"]
-
-# Print the metrics
-cat("Precision by Class: ", precision, "\n")
-cat("Recall by Class: ", recall, "\n")
-cat("F1-score by Class: ", f1_score, "\n")
-
-# Print the overall metrics like accuracy, Kappa, etc.
-cat("Overall Accuracy: ", metrics_weighted_model$overall['Accuracy'], "\n")
-cat("Overall Kappa: ", metrics_weighted_model$overall['Kappa'], "\n")
+# ===== 4) Inner/Outer resampling & AutoTuner helper =====
+inner_rs <- rsmp("cv", folds = 3); if ("stratify" %in% inner_rs$param_set$ids()) inner_rs$param_set$values$stratify <- TRUE
+outer_rs <- rsmp("cv", folds = 5); if ("stratify" %in% outer_rs$param_set$ids()) outer_rs$param_set$values$stratify <- TRUE
+terminator <- trm("evals", n_evals = 10)
+tuner      <- tnr("random_search")
 
 
-###still biased and not good
+make_at <- function(glrn, space, id) {
+  AutoTuner$new(
+    learner = glrn,
+    resampling = inner_rs,
+    measure = msr("classif.acc"),
+    search_space = space,
+    terminator = terminator,
+    tuner = tuner,
+    id = id,
+    store_tuning_instance = TRUE,
+    store_benchmark_result = TRUE
+  )
+}
 
-# Manually oversample the minority class (informational)
-informational_class <- supervised[supervised$preferred_offer_type == "informational", ]
-oversample_informational <- informational_class[sample(1:nrow(informational_class), size = 1000, replace = TRUE), ]
+at_xgb <- make_at(g_xgb, space_xgb, "xgb")
+at_rf  <- make_at(g_rf,  space_rf,  "ranger")
+at_svm <- make_at(g_svm, space_svm, "svm")
+at_mn  <- make_at(g_mn,  space_mn,  "multinom")
 
-# Combine back with the original dataset
-oversampled_data <- rbind(supervised, oversample_informational)
+# ===== 5) Nested CV on 80% train to find winner =====
+design <- benchmark_grid(
+  tasks = task_train,
+  learners = list(at_xgb, at_rf, at_mn, at_svm),
+  resamplings = outer_rs
+)
+bmr <- benchmark(design, store_models = TRUE)
 
 
-# Set seed for reproducibility
-set.seed(123)
 
-# Create a train/test split (70% train, 30% test)
-train_index_oversample <- createDataPartition(oversampled_data$preferred_offer_type, p = 0.7, list = FALSE)
+# Aggregate unbiased outer-CV metrics on train split
+agg <- as.data.table(bmr$aggregate(list(
+  msr("classif.acc"),
+  msr("classif.bacc"),
+  msr("classif.fbeta")  # F1 macro (beta=1) به‌صورت پیش‌فرض
+)))
+print(agg[order(-classif.acc)])
 
-# Split the data into training and test sets
-train_set <- oversampled_data[train_index_oversample, ]
-test_set  <- oversampled_data[-train_index_oversample, ]
+# Pick winner by outer-CV accuracy (تغییر بده اگر معیار دیگری اولویت دارد)
+perf_by_learner <- agg[, .(acc = mean(classif.acc)), by = learner_id][order(-acc)]
+winner_id <- perf_by_learner$learner_id[1]
+cat(sprintf("\nSelected winner on 80%%-train (nested CV): %s\n", winner_id))
 
-# Check the dimensions to ensure the split worked correctly
-dim(train_set)
-dim(test_set)
-
-# Convert the data frame into a matrix, which is required by XGBoost
-x_train <- model.matrix(preferred_offer_type ~ . -1, data = train_set)
-x_test  <- model.matrix(preferred_offer_type ~ . -1, data = test_set)
-
-# The target variable needs to be converted to numeric (XGBoost needs labels as integers)
-y_train <- as.numeric(train_set$preferred_offer_type) - 1 # XGBoost requires 0-based indexing
-y_test  <- as.numeric(test_set$preferred_offer_type) - 1
-
-# Convert the dataset into DMatrix objects (used by XGBoost)
-dtrain <- xgb.DMatrix(data = x_train, label = y_train)
-dtest  <- xgb.DMatrix(data = x_test, label = y_test)
-
-# Set the parameters for the XGBoost model
-params <- list(
-  objective = "multi:softmax",  # Multi-class classification
-  eval_metric = "mlogloss",     # Evaluation metric (log loss)
-  num_class = 3,                # Number of classes
-  eta = 0.3,                    # Learning rate
-  max_depth = 6,                # Maximum depth of trees
-  subsample = 0.8,              # Row sampling rate
-  colsample_bytree = 0.8        # Feature sampling rate
+winner <- switch(winner_id,
+                 "xgb"    = at_xgb,
+                 "ranger" = at_rf,
+                 "glmnet" = at_glm,
+                 "svm"    = at_svm
 )
 
-# Train the XGBoost model
-xgb_model <- xgb.train(
-  params = params,
-  data = dtrain,
-  nrounds = 100,                # Number of boosting rounds
-  watchlist = list(train = dtrain, eval = dtest),
-  early_stopping_rounds = 10,   # Stop early if no improvement after 10 rounds
-  verbose = 1                   # Print output
-)
+# ===== 6) Fit winner on ALL 80% train, then evaluate ONCE on 20% external test =====
+set.seed(999)
+winner$train(task_train)
 
-# Make predictions on the test set
-y_pred <- predict(xgb_model, newdata = dtest)
-
-# Convert predictions to factor for comparison
-y_pred <- as.factor(y_pred)
-y_test <- as.factor(y_test)
-
-# Calculate metrics for all classes
-metrics <- confusionMatrix(y_pred, y_test, mode = "everything")
-print(metrics)
-
-# Extract precision, recall, F1-score, and other metrics
-precision <- metrics$byClass[, "Precision"]
-recall <- metrics$byClass[, "Recall"]
-f1_score <- metrics$byClass[, "F1"]
-
-# Print the metrics
-cat("Precision by Class: ", precision, "\n")
-cat("Recall by Class: ", recall, "\n")
-cat("F1-score by Class: ", f1_score, "\n")
-
-# Print the overall metrics like accuracy, Kappa, etc.
-cat("Overall Accuracy: ", metrics$overall['Accuracy'], "\n")
-cat("Overall Kappa: ", metrics$overall['Kappa'], "\n")
-
-# Get feature importance and plot
-importance_matrix <- xgb.importance(model = xgb_model)
-xgb.plot.importance(importance_matrix)
-
-
-###weighted oversampling data model
-
-# Get the class frequencies from the training set
-class_freq <- table(y_train)
-
-# Calculate the inverse of frequencies as class weights
-class_weights <- max(class_freq) / class_freq
-
-# Print the class weights for reference
-print(class_weights)
-
-
-# Adjust the parameters to include class weights
-params <- list(
-  objective = "multi:softmax",  # Multi-class classification
-  eval_metric = "mlogloss",     # Evaluation metric (log loss)
-  num_class = 3,                # Number of classes
-  eta = 0.3,                    # Learning rate
-  max_depth = 6,                # Maximum depth of trees
-  subsample = 0.8,              # Row sampling rate
-  colsample_bytree = 0.8        # Feature sampling rate
-)
-
-# Train the model with class weights applied
-xgb_model_weighted <- xgb.train(
-  params = params,
-  data = dtrain,
-  nrounds = 100,
-  watchlist = list(train = dtrain, eval = dtest),
-  early_stopping_rounds = 10,
-  weight = class_weights[as.factor(y_train) + 1],  # Apply class weights
-  verbose = 1
-)
-
-
-# Make predictions on the test set
-y_pred_weighted  <- predict(xgb_model_weighted, newdata = dtest)
-
-# Convert predictions to factor for comparison
-y_pred_weighted <- as.factor(y_pred_weighted)
-y_test <- as.factor(y_test)
-
-# Calculate metrics for all classes
-metrics_weighted_model_2 <- confusionMatrix(y_pred_weighted, y_test, mode = "everything")
-print(metrics_weighted_model_2)
-
-# Extract precision, recall, F1-score, and other metrics
-precision <- metrics_weighted_model_2$byClass[, "Precision"]
-recall <- metrics_weighted_model_2$byClass[, "Recall"]
-f1_score <- metrics_weighted_model_2$byClass[, "F1"]
-
-# Print the metrics
-cat("Precision by Class: ", precision, "\n")
-cat("Recall by Class: ", recall, "\n")
-cat("F1-score by Class: ", f1_score, "\n")
-
-# Print the overall metrics like accuracy, Kappa, etc.
-cat("Overall Accuracy: ", metrics_weighted_model_2$overall['Accuracy'], "\n")
-cat("Overall Kappa: ", metrics_weighted_model_2$overall['Kappa'], "\n")
+pred_test <- winner$predict(task_test)
 
 
 
-##########################################
+# Metrics: Accuracy, Precision/Recall/F1 (macro)
+acc   <- pred_test$score(msr("classif.acc"))
 
 
-# Assuming you have confusion matrices from both models (initial and oversampled)
-# Replace 'metrics' and 'metrics_weighted_model' with your actual confusion matrices
 
-# Create confusion matrices
-cm_initial <- as.data.frame(metrics_1$table)
-cm_weighted <- as.data.frame(metrics_weighted_model$table)
-cm_oversampled <- as.data.frame(metrics$table)
-cm_oversampled_weighted <- as.data.frame(metrics_weighted_model_2$table)
 
-# Plot confusion matrix for initial model
-plot_cm_initial <- ggplot(data = cm_initial, aes(x = Prediction, y = Reference)) +
-  geom_tile(aes(fill = Freq), color = "white") +
-  scale_fill_gradient(low = "white", high = "blue") +
-  geom_text(aes(label = Freq), vjust = 1) +
-  labs(title = "Confusion Matrix (Initial Model)", x = "Predicted Class", y = "True Class") +
+pd <- as.data.table(pred_test)
+classes <- levels(pd$truth)
+
+# Confusion matrix using caret
+conf_mat <- confusionMatrix(pd$response, pd$truth)
+
+# Accuracy
+accuracy <- conf_mat$overall['Accuracy']
+
+# Precision, Recall, F1 for each class
+precision <- conf_mat$byClass[,'Precision']
+recall <- conf_mat$byClass[,'Recall']
+f1 <- conf_mat$byClass[,'F1']
+
+# Print results
+cat("Accuracy:", accuracy, "\n\n")
+cat("Precision:\n"); print(precision)
+cat("\nRecall:\n"); print(recall)
+cat("\nF1 Score:\n"); print(f1)
+
+macro_precision <- mean(precision, na.rm = TRUE)
+macro_recall <- mean(recall, na.rm = TRUE)
+macro_f1 <- mean(f1, na.rm = TRUE)
+
+cat("\nMacro Precision:", macro_precision)
+cat("\nMacro Recall:", macro_recall)
+cat("\nMacro F1:", macro_f1, "\n")
+
+
+
+
+
+
+
+
+
+
+# Confusion matrix (Test)
+cm <- with(pred_test$data, table(truth, response))
+print(cm)
+
+# ===== 7) Learning Curve on TRAIN split =====
+stratified_subset_ids <- function(task, frac = 1.0, seed = 42) {
+  stopifnot(frac > 0, frac <= 1)
+  set.seed(seed)
+  ids <- task$row_ids
+  tr  <- task$truth()
+  idx_by_class <- split(ids, tr)
+  sub_ids <- unlist(lapply(idx_by_class, function(v) {
+    k <- max(1, ceiling(length(v) * frac))
+    sample(v, k)
+  }), use.names = FALSE)
+  sort(unique(sub_ids))
+}
+
+sizes  <- c(0.1, 0.2, 0.4, 0.6, 0.8, 1.0)
+lc_res <- vector("list", length(sizes))
+meas   <- msrs(c("classif.acc", "classif.bacc"))   # مجموعهٔ معیارها
+
+for (i in seq_along(sizes)) {
+  s <- sizes[i]
+  sub_ids  <- stratified_subset_ids(task_train, frac = s, seed = 100 + i)
+
+  sub_task <- task_train$clone()
+  sub_task$filter(sub_ids)
+
+  rr <- resample(sub_task, winner, rsmp("cv", folds = 5))
+
+  # نکتهٔ کلیدی: تبدیل بردار نام‌دار به data.table با نام‌های درست
+  ag_vec <- rr$aggregate(meas)                  # named numeric vector
+  ag_dt  <- as.data.table(as.list(ag_vec))      # -> data.table با ستون‌های درست
+  ag_dt[, fraction := s]
+
+  lc_res[[i]] <- ag_dt
+}
+
+lc_dt <- rbindlist(lc_res, fill = TRUE)
+
+# حالا ستون‌ها وجود دارند
+print(names(lc_dt))
+# [1] "classif.acc" "classif.bacc" "fraction"
+
+p_acc <- ggplot(lc_dt, aes(x = fraction, y = classif.acc)) +
+  geom_line() + geom_point() +
+  labs(x = "Fraction of TRAIN used", y = "CV Accuracy", title = "Learning Curve (Accuracy)") +
   theme_minimal()
 
-# Plot confusion matrix for weighted model
-plot_cm_weighted <- ggplot(data = cm_weighted, aes(x = Prediction, y = Reference)) +
-  geom_tile(aes(fill = Freq), color = "white") +
-  scale_fill_gradient(low = "white", high = "blue") +
-  geom_text(aes(label = Freq), vjust = 1) +
-  labs(title = "Confusion Matrix (Weighted Model)", x = "Predicted Class", y = "True Class") +
+p_bacc <- ggplot(lc_dt, aes(x = fraction, y = classif.bacc)) +
+  geom_line() + geom_point() +
+  labs(x = "Fraction of TRAIN used", y = "CV Balanced Accuracy", title = "Learning Curve (Balanced Acc)") +
   theme_minimal()
 
-# Plot confusion matrix for oversampled model
-plot_cm_oversampled <- ggplot(data = cm_oversampled, aes(x = Prediction, y = Reference)) +
-  geom_tile(aes(fill = Freq), color = "white") +
-  scale_fill_gradient(low = "white", high = "blue") +
-  geom_text(aes(label = Freq), vjust = 1) +
-  labs(title = "Confusion Matrix (Oversampled Model)", x = "Predicted Class", y = "True Class") +
-  theme_minimal()
-
-# Plot confusion matrix for oversampled and weighted model
-plot_cm_oversampled_weighted <- ggplot(data = cm_oversampled_weighted, aes(x = Prediction, y = Reference)) +
-  geom_tile(aes(fill = Freq), color = "white") +
-  scale_fill_gradient(low = "white", high = "blue") +
-  geom_text(aes(label = Freq), vjust = 1) +
-  labs(title = "Confusion Matrix (Oversampled and Weighted Model)", x = "Predicted Class", y = "True Class") +
-  theme_minimal()
-
-# Arrange both confusion matrix plots side by side
-grid.arrange(plot_cm_initial, plot_cm_oversampled,plot_cm_weighted,plot_cm_oversampled_weighted,  ncol = 2)
+print(p_acc); print(p_bacc)
 
 
+
+
+# ===== 8) Save artifacts =====
+saveRDS(winner, "winner_autotuned_on_80pct.rds")
+saveRDS(pred_test, "external_test_predictions.rds")
+fwrite(as.data.table(cm), "confusion_matrix_test.csv")
