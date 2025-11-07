@@ -225,5 +225,7 @@ supervised <- supervised %>%
 #removing null values
 supervised <- supervised[!is.na(supervised$income), ]
 
+
+
 #save supervised dataset
 write.csv(supervised, file = "F:/University/Projects/Data Science/Statistical Learning/Maven Project/supervised.csv", row.names = FALSE)
