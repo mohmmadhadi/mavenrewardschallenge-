@@ -199,7 +199,7 @@ space_mn <- ps(
 # SVM (radial)
 lrn_svm <- lrn(
   "classif.svm",
-  type   = "C-classification",   # لازم برای cost/gamma
+  type   = "C-classification",
   kernel = "radial"
 )
 lrn_svm$id <- "svm"
@@ -254,11 +254,11 @@ bmr <- benchmark(design, store_models = TRUE)
 agg <- as.data.table(bmr$aggregate(list(
   msr("classif.acc"),
   msr("classif.bacc"),
-  msr("classif.fbeta")  # F1 macro (beta=1) به‌صورت پیش‌فرض
+  msr("classif.fbeta")  # F1 macro (beta=1)
 )))
 print(agg[order(-classif.acc)])
 
-# Pick winner by outer-CV accuracy (تغییر بده اگر معیار دیگری اولویت دارد)
+# Pick winner by outer-CV accuracy
 perf_by_learner <- agg[, .(acc = mean(classif.acc)), by = learner_id][order(-acc)]
 winner_id <- perf_by_learner$learner_id[1]
 cat(sprintf("\nSelected winner on 80%%-train (nested CV): %s\n", winner_id))
@@ -325,58 +325,6 @@ cat("\nMacro F1:", macro_f1, "\n")
 cm <- with(pred_test$data, table(truth, response))
 print(cm)
 
-# ===== 7) Learning Curve on TRAIN split =====
-stratified_subset_ids <- function(task, frac = 1.0, seed = 42) {
-  stopifnot(frac > 0, frac <= 1)
-  set.seed(seed)
-  ids <- task$row_ids
-  tr  <- task$truth()
-  idx_by_class <- split(ids, tr)
-  sub_ids <- unlist(lapply(idx_by_class, function(v) {
-    k <- max(1, ceiling(length(v) * frac))
-    sample(v, k)
-  }), use.names = FALSE)
-  sort(unique(sub_ids))
-}
-
-sizes  <- c(0.1, 0.2, 0.4, 0.6, 0.8, 1.0)
-lc_res <- vector("list", length(sizes))
-meas   <- msrs(c("classif.acc", "classif.bacc"))   # مجموعهٔ معیارها
-
-for (i in seq_along(sizes)) {
-  s <- sizes[i]
-  sub_ids  <- stratified_subset_ids(task_train, frac = s, seed = 100 + i)
-
-  sub_task <- task_train$clone()
-  sub_task$filter(sub_ids)
-
-  rr <- resample(sub_task, winner, rsmp("cv", folds = 5))
-
-  # نکتهٔ کلیدی: تبدیل بردار نام‌دار به data.table با نام‌های درست
-  ag_vec <- rr$aggregate(meas)                  # named numeric vector
-  ag_dt  <- as.data.table(as.list(ag_vec))      # -> data.table با ستون‌های درست
-  ag_dt[, fraction := s]
-
-  lc_res[[i]] <- ag_dt
-}
-
-lc_dt <- rbindlist(lc_res, fill = TRUE)
-
-# حالا ستون‌ها وجود دارند
-print(names(lc_dt))
-# [1] "classif.acc" "classif.bacc" "fraction"
-
-p_acc <- ggplot(lc_dt, aes(x = fraction, y = classif.acc)) +
-  geom_line() + geom_point() +
-  labs(x = "Fraction of TRAIN used", y = "CV Accuracy", title = "Learning Curve (Accuracy)") +
-  theme_minimal()
-
-p_bacc <- ggplot(lc_dt, aes(x = fraction, y = classif.bacc)) +
-  geom_line() + geom_point() +
-  labs(x = "Fraction of TRAIN used", y = "CV Balanced Accuracy", title = "Learning Curve (Balanced Acc)") +
-  theme_minimal()
-
-print(p_acc); print(p_bacc)
 
 
 

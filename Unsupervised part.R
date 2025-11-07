@@ -205,11 +205,11 @@ df <- unsupervised %>%
   inner_join(cluster_map, by = "row_id")
 
 
-x_visits <- "num_transactions"                 # تعداد تراکنش‌ها (visits)
-y_basket <- "avg_spending_per_transaction"     # میانگین مبلغ هر تراکنش (basket)
-rev_col  <- "total_spent"                      # مجموع هزینه/درآمد دوره (revenue)
-age_col  <- "age"                              # سن
-inc_col  <- "income"                           # درآمد
+x_visits <- "num_transactions"                 # تعدnumber of transactions (visits)
+y_basket <- "avg_spending_per_transaction"     # مaverage of each transaction (basket)
+rev_col  <- "total_spent"                      # total revenue of the period (revenue)
+age_col  <- "age"                              # age
+inc_col  <- "income"
 
 
 ### Plot the clusters using the PCA results
@@ -275,8 +275,8 @@ cluster_profile <- df %>%
     basket_sd           = sd(.data[["avg_spending_per_transaction"]],  na.rm = TRUE),
 
     # Two “typical spend” definitions
-    monthly_spend_typ_med  = visits_med  * basket_med,   # رفتار تیپیک (robust)
-    monthly_spend_typ_mean = visits_mean * basket_mean,  # مقدار مورد انتظار
+    monthly_spend_typ_med  = visits_med  * basket_med,   # tipycal behaviour (robust)
+    monthly_spend_typ_mean = visits_mean * basket_mean,  # expected value
 
     age_mean            = mean(.data[["age"]],    na.rm = TRUE),
     income_mean         = mean(.data[["income"]], na.rm = TRUE)
@@ -309,7 +309,6 @@ cluster_bullets <- cluster_profile %>%
   arrange(desc(share_of_revenue)) %>%
   select(cluster, title, bullets)
 
-# 8.2 چاپ خوانا در کنسول
 invisible(lapply(seq_len(nrow(cluster_bullets)), function(i) {
   cat("\n", cluster_bullets$title[i], "\n", cluster_bullets$bullets[i], sep = "")
 }))
